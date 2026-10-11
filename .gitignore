@@ -1,0 +1,14 @@
+# .NET
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+
+# React
+**/node_modules/
+**/dist/
+
+# Variables de entorno
+.env
+.env.* 
