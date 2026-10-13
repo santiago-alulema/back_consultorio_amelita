@@ -36,7 +36,9 @@ public class ProductosController : ControllerBase
         decimal? PrecioCajaDescuento,
         decimal PrecioCompra,
         decimal PrecioVenta,
-        decimal StockMinimo
+        decimal StockMinimo,
+        string? NumeroLote,
+        DateOnly? FechaCaducidad
     );
 
     [HttpGet]
@@ -74,9 +76,14 @@ public class ProductosController : ControllerBase
                     .Where(l => l.EsActivo)
                     .Sum(l => l.StockActual),
                 ProximaCaducidad = x.Lotes
-                    .Where(l => l.EsActivo && l.StockActual > 0)
+                    .Where(l => l.EsActivo && l.FechaCaducidad != null)
                     .OrderBy(l => l.FechaCaducidad)
                     .Select(l => l.FechaCaducidad)
+                    .FirstOrDefault(),
+                NumeroLote = x.Lotes
+                    .Where(l => l.EsActivo && l.FechaCaducidad != null)
+                    .OrderBy(l => l.FechaCaducidad)
+                    .Select(l => l.NumeroLote)
                     .FirstOrDefault()
             })
             .OrderBy(x => x.Nombre)
@@ -100,6 +107,7 @@ public class ProductosController : ControllerBase
             x.StockMinimo,
             x.Stock,
             x.ProximaCaducidad,
+            x.NumeroLote,
             Estado = x.Stock <= 0
                 ? "AGOTADO"
                 : x.Stock <= x.StockMinimo
@@ -146,6 +154,23 @@ public class ProductosController : ControllerBase
         _db.Productos.Add(producto);
         await _db.SaveChangesAsync();
 
+        if (request.FechaCaducidad.HasValue || !string.IsNullOrWhiteSpace(request.NumeroLote))
+        {
+            _db.LotesProductos.Add(new LoteProducto
+            {
+                ProductoId = producto.Id,
+                NumeroLote = string.IsNullOrWhiteSpace(request.NumeroLote)
+                    ? "SIN-LOTE"
+                    : request.NumeroLote.Trim(),
+                FechaCaducidad = request.FechaCaducidad,
+                StockActual = 0,
+                PrecioCompra = request.PrecioCompra,
+                UsuarioCreacionId = User.GetUserId()
+            });
+
+            await _db.SaveChangesAsync();
+        }
+
         return Ok(producto);
     }
 
@@ -173,6 +198,39 @@ public class ProductosController : ControllerBase
         producto.PrecioVenta = request.PrecioVenta;
         producto.StockMinimo = request.StockMinimo;
         producto.UsuarioActualizacionId = User.GetUserId();
+
+        if (request.FechaCaducidad.HasValue || !string.IsNullOrWhiteSpace(request.NumeroLote))
+        {
+            var lote = await _db.LotesProductos
+                .Where(x => x.ProductoId == producto.Id && x.EsActivo)
+                .OrderBy(x => x.FechaCaducidad)
+                .FirstOrDefaultAsync();
+
+            if (lote is null)
+            {
+                lote = new LoteProducto
+                {
+                    ProductoId = producto.Id,
+                    NumeroLote = string.IsNullOrWhiteSpace(request.NumeroLote)
+                        ? "SIN-LOTE"
+                        : request.NumeroLote.Trim(),
+                    FechaCaducidad = request.FechaCaducidad,
+                    StockActual = 0,
+                    PrecioCompra = request.PrecioCompra,
+                    UsuarioCreacionId = User.GetUserId()
+                };
+
+                _db.LotesProductos.Add(lote);
+            }
+            else
+            {
+                lote.NumeroLote = string.IsNullOrWhiteSpace(request.NumeroLote)
+                    ? lote.NumeroLote
+                    : request.NumeroLote.Trim();
+                lote.FechaCaducidad = request.FechaCaducidad;
+                lote.UsuarioActualizacionId = User.GetUserId();
+            }
+        }
 
         await _db.SaveChangesAsync();
 

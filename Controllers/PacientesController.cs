@@ -81,6 +81,60 @@ public class PacientesController : ControllerBase
         return Ok(pacientes);
     }
 
+
+    [HttpGet("historial-atenciones")]
+    public async Task<IActionResult> HistorialAtenciones([FromQuery] string buscar)
+    {
+        if (string.IsNullOrWhiteSpace(buscar))
+        {
+            return BadRequest("Ingrese una cédula o nombre para buscar.");
+        }
+
+        var texto = buscar.Trim().ToLower();
+
+        var pacientes = await _db.Pacientes
+            .AsNoTracking()
+            .Where(x =>
+                x.EsActivo
+                && (
+                    x.Identificacion.Contains(buscar.Trim())
+                    || x.Nombres.ToLower().Contains(texto)
+                    || x.Apellidos.ToLower().Contains(texto)
+                )
+            )
+            .OrderBy(x => x.Apellidos)
+            .ThenBy(x => x.Nombres)
+            .Take(20)
+            .Select(x => new
+            {
+                x.Id,
+                x.Identificacion,
+                x.Nombres,
+                x.Apellidos,
+                Consultas = x.Consultas
+                    .Where(c => c.EsActivo)
+                    .OrderByDescending(c => c.FechaConsulta)
+                    .Select(c => new
+                    {
+                        c.Id,
+                        c.FechaConsulta,
+                        c.MotivoConsulta,
+                        c.Diagnostico,
+                        c.ValorConsulta,
+                        c.FormaPago,
+                        Medico = c.MedicoUsuario.Nombre + " " + c.MedicoUsuario.Apellido,
+                        RecetaId = c.Recetas
+                            .Where(r => r.EsActivo)
+                            .Select(r => (int?)r.Id)
+                            .FirstOrDefault()
+                    })
+                    .ToList()
+            })
+            .ToListAsync();
+
+        return Ok(pacientes);
+    }
+
     [HttpGet("{id:int}")]
     public async Task<IActionResult> GetById(int id)
     {
