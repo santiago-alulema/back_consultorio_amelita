@@ -151,8 +151,7 @@ public class RecetaPdfService
                         receta,
                         medicoImprime,
                         configuracion,
-                        rutaLogo,
-                        true
+                        rutaLogo
                     ));
 
                     row.ConstantItem(14).Element(DibujarLineaCorte);
@@ -162,8 +161,7 @@ public class RecetaPdfService
                         receta,
                         medicoImprime,
                         configuracion,
-                        rutaLogo,
-                        false
+                        rutaLogo
                     ));
                 });
             });
@@ -177,8 +175,7 @@ public class RecetaPdfService
         Receta receta,
         Usuario medicoImprime,
         ConfiguracionReceta configuracion,
-        string? rutaLogo,
-        bool esPrescripcion)
+        string? rutaLogo)
     {
         container
             .Border(1)
@@ -236,8 +233,8 @@ public class RecetaPdfService
 
                 column.Item()
                     .PaddingTop(3)
-                    .Text(esPrescripcion ? "Rp.:" : "Indicaciones:")
-                    .FontSize(esPrescripcion ? 13 : 11)
+                    .Text("Rp.:")
+                    .FontSize(13)
                     .Bold()
                     .Italic()
                     .FontColor("#2B5D87");
@@ -259,48 +256,33 @@ public class RecetaPdfService
                                     .Bold()
                                     .FontSize(10);
 
-                                if (esPrescripcion)
-                                {
-                                    if (detalle.Cantidad.HasValue)
+                                var indicaciones = string.Join(
+                                    " · ",
+                                    new[]
                                     {
-                                        var cantidad = FormatearCantidad(detalle.Cantidad.Value);
-                                        var cantidadLetras = NumeroEnLetras(detalle.Cantidad.Value);
+                                        detalle.Dosis,
+                                        string.IsNullOrWhiteSpace(detalle.Frecuencia)
+                                            ? null
+                                            : $"Cada {detalle.Frecuencia}",
+                                        string.IsNullOrWhiteSpace(detalle.Duracion)
+                                            ? null
+                                            : $"por {detalle.Duracion}",
+                                        detalle.Indicaciones
+                                    }.Where(x => !string.IsNullOrWhiteSpace(x))
+                                );
 
-                                        item.Item()
-                                            .Text($"Cantidad: {cantidad} ({cantidadLetras})")
-                                            .FontSize(8.5f);
-                                    }
-                                }
-                                else
+                                if (!string.IsNullOrWhiteSpace(indicaciones))
                                 {
-                                    var indicaciones = string.Join(
-                                        " · ",
-                                        new[]
-                                        {
-                                            detalle.Dosis,
-                                            string.IsNullOrWhiteSpace(detalle.Frecuencia)
-                                                ? null
-                                                : $"Cada {detalle.Frecuencia}",
-                                            string.IsNullOrWhiteSpace(detalle.Duracion)
-                                                ? null
-                                                : $"por {detalle.Duracion}",
-                                            detalle.Indicaciones
-                                        }.Where(x => !string.IsNullOrWhiteSpace(x))
-                                    );
-
-                                    if (!string.IsNullOrWhiteSpace(indicaciones))
-                                    {
-                                        item.Item().Text(indicaciones).FontSize(8.5f);
-                                    }
+                                    item.Item().Text(indicaciones).FontSize(8.5f);
                                 }
                             });
                         }
 
-                        if (!esPrescripcion && !string.IsNullOrWhiteSpace(receta.IndicacionesGenerales))
+                        if (!string.IsNullOrWhiteSpace(receta.IndicacionesGenerales))
                         {
                             contenido.Item().PaddingTop(4).Text(texto =>
                             {
-                                texto.Span("Indicaciones generales: ").Bold();
+                                texto.Span("Indicaciones: ").Bold();
                                 texto.Span(receta.IndicacionesGenerales);
                             });
                         }
@@ -379,75 +361,6 @@ public class RecetaPdfService
                 column.Item().Height(3);
             }
         });
-    }
-
-    private static string FormatearCantidad(decimal cantidad)
-    {
-        return cantidad == decimal.Truncate(cantidad)
-            ? decimal.Truncate(cantidad).ToString("0")
-            : cantidad.ToString("0.##");
-    }
-
-    private static string NumeroEnLetras(decimal cantidad)
-    {
-        if (cantidad != decimal.Truncate(cantidad))
-        {
-            return FormatearCantidad(cantidad);
-        }
-
-        var numero = (int)decimal.Truncate(cantidad);
-
-        if (numero < 0 || numero > 999)
-        {
-            return numero.ToString();
-        }
-
-        if (numero == 0)
-        {
-            return "cero";
-        }
-
-        return EnteroEnLetras(numero);
-    }
-
-    private static string EnteroEnLetras(int numero)
-    {
-        string[] unidades =
-        {
-            "", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho", "nueve",
-            "diez", "once", "doce", "trece", "catorce", "quince", "dieciséis", "diecisiete",
-            "dieciocho", "diecinueve", "veinte", "veintiuno", "veintidós", "veintitrés",
-            "veinticuatro", "veinticinco", "veintiséis", "veintisiete", "veintiocho", "veintinueve"
-        };
-
-        if (numero < 30)
-        {
-            return unidades[numero];
-        }
-
-        if (numero < 100)
-        {
-            string[] decenas = { "", "", "", "treinta", "cuarenta", "cincuenta", "sesenta", "setenta", "ochenta", "noventa" };
-            var decena = numero / 10;
-            var unidad = numero % 10;
-
-            return unidad == 0
-                ? decenas[decena]
-                : $"{decenas[decena]} y {unidades[unidad]}";
-        }
-
-        if (numero == 100)
-        {
-            return "cien";
-        }
-
-        string[] centenas = { "", "ciento", "doscientos", "trescientos", "cuatrocientos", "quinientos", "seiscientos", "setecientos", "ochocientos", "novecientos" };
-        var centena = numero / 100;
-        var resto = numero % 100;
-
-        return resto == 0
-            ? centenas[centena]
-            : $"{centenas[centena]} {EnteroEnLetras(resto)}";
     }
 
     private static string CalcularEdad(DateOnly? fechaNacimiento)

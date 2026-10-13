@@ -36,9 +36,7 @@ public class ProductosController : ControllerBase
         decimal? PrecioCajaDescuento,
         decimal PrecioCompra,
         decimal PrecioVenta,
-        decimal StockMinimo,
-        string? NumeroLote,
-        DateOnly? FechaCaducidad
+        decimal StockMinimo
     );
 
     [HttpGet]
@@ -76,14 +74,9 @@ public class ProductosController : ControllerBase
                     .Where(l => l.EsActivo)
                     .Sum(l => l.StockActual),
                 ProximaCaducidad = x.Lotes
-                    .Where(l => l.EsActivo && l.FechaCaducidad != null)
+                    .Where(l => l.EsActivo && l.StockActual > 0)
                     .OrderBy(l => l.FechaCaducidad)
                     .Select(l => l.FechaCaducidad)
-                    .FirstOrDefault(),
-                NumeroLote = x.Lotes
-                    .Where(l => l.EsActivo && l.FechaCaducidad != null)
-                    .OrderBy(l => l.FechaCaducidad)
-                    .Select(l => l.NumeroLote)
                     .FirstOrDefault()
             })
             .OrderBy(x => x.Nombre)
@@ -107,7 +100,6 @@ public class ProductosController : ControllerBase
             x.StockMinimo,
             x.Stock,
             x.ProximaCaducidad,
-            x.NumeroLote,
             Estado = x.Stock <= 0
                 ? "AGOTADO"
                 : x.Stock <= x.StockMinimo
@@ -154,23 +146,6 @@ public class ProductosController : ControllerBase
         _db.Productos.Add(producto);
         await _db.SaveChangesAsync();
 
-        if (request.FechaCaducidad.HasValue || !string.IsNullOrWhiteSpace(request.NumeroLote))
-        {
-            _db.LotesProductos.Add(new LoteProducto
-            {
-                ProductoId = producto.Id,
-                NumeroLote = string.IsNullOrWhiteSpace(request.NumeroLote)
-                    ? "SIN-LOTE"
-                    : request.NumeroLote.Trim(),
-                FechaCaducidad = request.FechaCaducidad,
-                StockActual = 0,
-                PrecioCompra = request.PrecioCompra,
-                UsuarioCreacionId = User.GetUserId()
-            });
-
-            await _db.SaveChangesAsync();
-        }
-
         return Ok(producto);
     }
 
@@ -199,39 +174,6 @@ public class ProductosController : ControllerBase
         producto.StockMinimo = request.StockMinimo;
         producto.UsuarioActualizacionId = User.GetUserId();
 
-        if (request.FechaCaducidad.HasValue || !string.IsNullOrWhiteSpace(request.NumeroLote))
-        {
-            var lote = await _db.LotesProductos
-                .Where(x => x.ProductoId == producto.Id && x.EsActivo)
-                .OrderBy(x => x.FechaCaducidad)
-                .FirstOrDefaultAsync();
-
-            if (lote is null)
-            {
-                lote = new LoteProducto
-                {
-                    ProductoId = producto.Id,
-                    NumeroLote = string.IsNullOrWhiteSpace(request.NumeroLote)
-                        ? "SIN-LOTE"
-                        : request.NumeroLote.Trim(),
-                    FechaCaducidad = request.FechaCaducidad,
-                    StockActual = 0,
-                    PrecioCompra = request.PrecioCompra,
-                    UsuarioCreacionId = User.GetUserId()
-                };
-
-                _db.LotesProductos.Add(lote);
-            }
-            else
-            {
-                lote.NumeroLote = string.IsNullOrWhiteSpace(request.NumeroLote)
-                    ? lote.NumeroLote
-                    : request.NumeroLote.Trim();
-                lote.FechaCaducidad = request.FechaCaducidad;
-                lote.UsuarioActualizacionId = User.GetUserId();
-            }
-        }
-
         await _db.SaveChangesAsync();
 
         return NoContent();
@@ -256,146 +198,240 @@ public class ProductosController : ControllerBase
     }
 
     [HttpPost("importar-excel")]
+    [RequestSizeLimit(10_000_000)]
     public async Task<IActionResult> ImportarExcel(IFormFile archivo)
     {
-        if (archivo.Length == 0)
+        if (archivo is null || archivo.Length == 0)
         {
-            return BadRequest("Archivo vacío.");
+            return BadRequest("Seleccione un archivo Excel.");
         }
 
-        var creados = 0;
-        var actualizados = 0;
-        var filasConError = new List<object>();
-
-        using var stream = archivo.OpenReadStream();
-        using var workbook = new XLWorkbook(stream);
-
-        var worksheet = workbook.Worksheet("INVENTARIO");
-        var headerRow = worksheet.RowsUsed()
-            .FirstOrDefault(row => row.CellsUsed().Any(cell =>
-                cell.GetString()
-                    .Trim()
-                    .Equals("CÓDIGO", StringComparison.OrdinalIgnoreCase)
-            ))
-            ?.RowNumber() ?? 4;
-
-        var ultimaFila = worksheet.LastRowUsed()?.RowNumber() ?? headerRow;
-
-        for (var fila = headerRow + 1; fila <= ultimaFila; fila++)
+        if (!Path.GetExtension(archivo.FileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
         {
-            try
+            return BadRequest("La plantilla debe estar en formato .xlsx.");
+        }
+
+        try
+        {
+            using var stream = archivo.OpenReadStream();
+            using var workbook = new XLWorkbook(stream);
+
+            var worksheet = workbook.Worksheets
+                .FirstOrDefault(x => x.Name.Equals("INVENTARIO", StringComparison.OrdinalIgnoreCase));
+
+            if (worksheet is null)
             {
-                var codigo = worksheet.Cell(fila, 2).GetString().Trim();
-                var nombre = worksheet.Cell(fila, 3).GetString().Trim();
+                return BadRequest("El archivo debe contener una hoja llamada INVENTARIO.");
+            }
 
-                if (string.IsNullOrWhiteSpace(nombre))
+            var headerRow = worksheet.RowsUsed()
+                .FirstOrDefault(row => row.CellsUsed().Any(cell =>
+                    cell.GetString()
+                        .Trim()
+                        .Equals("CÓDIGO", StringComparison.OrdinalIgnoreCase)
+                ));
+
+            if (headerRow is null)
+            {
+                return BadRequest("No se encontró la fila de encabezados de la plantilla.");
+            }
+
+            var creados = 0;
+            var actualizados = 0;
+            var filasConError = new List<object>();
+            var numeroFilaEncabezado = headerRow.RowNumber();
+            var ultimaFila = worksheet.LastRowUsed()?.RowNumber() ?? numeroFilaEncabezado;
+            var usuarioId = User.GetUserId();
+
+            for (var fila = numeroFilaEncabezado + 1; fila <= ultimaFila; fila++)
+            {
+                try
                 {
-                    continue;
-                }
+                    var codigo = worksheet.Cell(fila, 2).GetString().Trim();
+                    var nombre = worksheet.Cell(fila, 3).GetString().Trim();
 
-                if (string.IsNullOrWhiteSpace(codigo))
-                {
-                    codigo = $"IMP-{fila:00000}";
-                }
-
-                var laboratorio = worksheet.Cell(fila, 4).GetString().Trim();
-                var lote = worksheet.Cell(fila, 5).GetString().Trim();
-                var caducidad = ObtenerFecha(worksheet.Cell(fila, 6).GetString());
-                var unidadesPorCaja = ObtenerDecimalNullable(worksheet.Cell(fila, 8));
-                var precioCaja = ObtenerDecimalNullable(worksheet.Cell(fila, 10));
-                var precioCajaDescuento = ObtenerDecimalNullable(worksheet.Cell(fila, 11));
-                var precioVenta = ObtenerDecimal(worksheet.Cell(fila, 12));
-                var stockActual = ObtenerDecimal(worksheet.Cell(fila, 15));
-                var precioCompra = CalcularPrecioCompra(
-                    unidadesPorCaja,
-                    precioCaja,
-                    precioCajaDescuento
-                );
-
-                var producto = await _db.Productos
-                    .FirstOrDefaultAsync(x => x.Codigo == codigo);
-
-                if (producto is null)
-                {
-                    producto = new Producto
+                    if (string.IsNullOrWhiteSpace(nombre))
                     {
-                        Codigo = codigo,
-                        Nombre = nombre,
-                        Laboratorio = laboratorio,
-                        UnidadesPorCaja = unidadesPorCaja,
-                        PrecioCaja = precioCaja,
-                        PrecioCajaDescuento = precioCajaDescuento,
-                        PrecioCompra = precioCompra,
-                        PrecioVenta = precioVenta,
-                        StockMinimo = 5,
-                        UsuarioCreacionId = User.GetUserId()
-                    };
+                        continue;
+                    }
 
-                    _db.Productos.Add(producto);
-                    await _db.SaveChangesAsync();
-                    creados++;
-                }
-                else
-                {
-                    producto.Nombre = nombre;
-                    producto.Laboratorio = laboratorio;
-                    producto.UnidadesPorCaja = unidadesPorCaja;
-                    producto.PrecioCaja = precioCaja;
-                    producto.PrecioCajaDescuento = precioCajaDescuento;
-                    producto.PrecioCompra = precioCompra;
-                    producto.PrecioVenta = precioVenta;
-                    producto.UsuarioActualizacionId = User.GetUserId();
+                    if (string.IsNullOrWhiteSpace(codigo))
+                    {
+                        codigo = $"IMP-{fila:00000}";
+                    }
 
-                    await _db.SaveChangesAsync();
-                    actualizados++;
-                }
-
-                var numeroLote = string.IsNullOrWhiteSpace(lote)
-                    ? "SIN-LOTE"
-                    : lote;
-
-                var loteExistente = await _db.LotesProductos
-                    .FirstOrDefaultAsync(x =>
-                        x.ProductoId == producto.Id
-                        && x.NumeroLote == numeroLote
+                    var laboratorio = worksheet.Cell(fila, 4).GetString().Trim();
+                    var numeroLote = worksheet.Cell(fila, 5).GetString().Trim();
+                    var caducidad = ObtenerFecha(worksheet.Cell(fila, 6));
+                    var unidadesPorCaja = ObtenerDecimalNullable(worksheet.Cell(fila, 8));
+                    var precioCaja = ObtenerDecimalNullable(worksheet.Cell(fila, 10));
+                    var precioCajaDescuento = ObtenerDecimalNullable(worksheet.Cell(fila, 11));
+                    var precioVenta = ObtenerDecimal(worksheet.Cell(fila, 12));
+                    var stockActual = ObtenerDecimal(worksheet.Cell(fila, 15));
+                    var precioCompra = CalcularPrecioCompra(
+                        unidadesPorCaja,
+                        precioCaja,
+                        precioCajaDescuento
                     );
 
-                if (loteExistente is null && stockActual > 0)
-                {
-                    await _inventarioService.RegistrarEntrada(
-                        producto.Id,
+                    var producto = await _db.Productos
+                        .FirstOrDefaultAsync(x => x.Codigo == codigo);
+
+                    if (producto is null)
+                    {
+                        producto = new Producto
+                        {
+                            Codigo = codigo,
+                            Nombre = nombre,
+                            Laboratorio = laboratorio,
+                            UnidadesPorCaja = unidadesPorCaja,
+                            PrecioCaja = precioCaja,
+                            PrecioCajaDescuento = precioCajaDescuento,
+                            PrecioCompra = precioCompra,
+                            PrecioVenta = precioVenta,
+                            StockMinimo = 5,
+                            UsuarioCreacionId = usuarioId
+                        };
+
+                        _db.Productos.Add(producto);
+                        await _db.SaveChangesAsync();
+                        creados++;
+                    }
+                    else
+                    {
+                        producto.Nombre = nombre;
+                        producto.Laboratorio = laboratorio;
+                        producto.UnidadesPorCaja = unidadesPorCaja;
+                        producto.PrecioCaja = precioCaja;
+                        producto.PrecioCajaDescuento = precioCajaDescuento;
+                        producto.PrecioCompra = precioCompra;
+                        producto.PrecioVenta = precioVenta;
+                        producto.EsActivo = true;
+                        producto.UsuarioActualizacionId = usuarioId;
+
+                        await _db.SaveChangesAsync();
+                        actualizados++;
+                    }
+
+                    numeroLote = string.IsNullOrWhiteSpace(numeroLote)
+                        ? "SIN-LOTE"
+                        : numeroLote;
+
+                    await SincronizarLoteImportado(
+                        producto,
                         numeroLote,
                         caducidad,
                         stockActual,
-                        TipoMovimientoInventario.CargaInicial,
-                        User.GetUserId(),
-                        $"Importación {archivo.FileName}",
-                        precioCompra
+                        precioCompra,
+                        usuarioId,
+                        archivo.FileName
                     );
                 }
-            }
-            catch (Exception ex)
-            {
-                filasConError.Add(new
+                catch (Exception ex)
                 {
-                    fila,
-                    error = ex.Message
-                });
+                    filasConError.Add(new
+                    {
+                        fila,
+                        error = ex.Message
+                    });
+                }
             }
-        }
 
-        return Ok(new
+            return Ok(new
+            {
+                creados,
+                actualizados,
+                errores = filasConError.Count,
+                filasConError
+            });
+        }
+        catch (Exception ex)
         {
-            creados,
-            actualizados,
-            errores = filasConError.Count,
-            filasConError
-        });
+            return BadRequest(new
+            {
+                message = $"No se pudo leer el archivo Excel: {ex.Message}"
+            });
+        }
     }
 
-    private static DateOnly? ObtenerFecha(string valor)
+    private async Task SincronizarLoteImportado(
+        Producto producto,
+        string numeroLote,
+        DateOnly? caducidad,
+        decimal stockActual,
+        decimal precioCompra,
+        int usuarioId,
+        string nombreArchivo)
     {
-        return DateTime.TryParse(valor.Trim(), out var fecha)
+        var lote = await _db.LotesProductos
+            .FirstOrDefaultAsync(x =>
+                x.ProductoId == producto.Id
+                && x.NumeroLote == numeroLote
+                && x.EsActivo
+            );
+
+        if (lote is null)
+        {
+            if (stockActual <= 0)
+            {
+                return;
+            }
+
+            await _inventarioService.RegistrarEntrada(
+                producto.Id,
+                numeroLote,
+                caducidad,
+                stockActual,
+                TipoMovimientoInventario.CargaInicial,
+                usuarioId,
+                $"Importación {nombreArchivo}",
+                precioCompra
+            );
+
+            return;
+        }
+
+        lote.FechaCaducidad = caducidad;
+        lote.PrecioCompra = precioCompra;
+        lote.UsuarioActualizacionId = usuarioId;
+
+        var diferencia = stockActual - lote.StockActual;
+
+        if (diferencia == 0)
+        {
+            await _db.SaveChangesAsync();
+            return;
+        }
+
+        var stockAnterior = lote.StockActual;
+        lote.StockActual = stockActual;
+
+        _db.MovimientosInventario.Add(new MovimientoInventario
+        {
+            ProductoId = producto.Id,
+            LoteProductoId = lote.Id,
+            Tipo = diferencia > 0
+                ? TipoMovimientoInventario.AjustePositivo
+                : TipoMovimientoInventario.AjusteNegativo,
+            Cantidad = Math.Abs(diferencia),
+            StockAnterior = stockAnterior,
+            StockPosterior = stockActual,
+            Referencia = $"Importación {nombreArchivo}",
+            Motivo = "Sincronización de stock desde plantilla Excel",
+            UsuarioCreacionId = usuarioId
+        });
+
+        await _db.SaveChangesAsync();
+    }
+
+    private static DateOnly? ObtenerFecha(IXLCell celda)
+    {
+        if (celda.TryGetValue<DateTime>(out var fecha))
+        {
+            return DateOnly.FromDateTime(fecha);
+        }
+
+        return DateTime.TryParse(celda.GetString().Trim(), out fecha)
             ? DateOnly.FromDateTime(fecha)
             : null;
     }
