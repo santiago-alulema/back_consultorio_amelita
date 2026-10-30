@@ -51,7 +51,7 @@ public class PacientesController : ControllerBase
 
             query = query.Where(x =>
                 x.Identificacion.Contains(buscar.Trim())
-                || x.Nombres.ToLower().Contains(texto)
+                || (x.Nombres + " " + x.Apellidos).ToLower().Contains(texto)
                 || x.Apellidos.ToLower().Contains(texto)
             );
         }

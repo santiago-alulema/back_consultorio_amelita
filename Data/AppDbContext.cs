@@ -13,6 +13,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Paciente> Pacientes => Set<Paciente>();
     public DbSet<HistoriaClinica> HistoriasClinicas => Set<HistoriaClinica>();
     public DbSet<Consulta> Consultas => Set<Consulta>();
+    public DbSet<Enfermedad> Enfermedades => Set<Enfermedad>();
     public DbSet<Receta> Recetas => Set<Receta>();
     public DbSet<RecetaDetalle> RecetasDetalles => Set<RecetaDetalle>();
     public DbSet<Cita> Citas => Set<Cita>();
@@ -36,6 +37,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.HasDefaultSchema("clinica");
+
+        modelBuilder.Entity<Enfermedad>(entity =>
+        {
+            entity.HasKey(x => x.Codigo);
+            entity.Property(x => x.Codigo).HasMaxLength(10);
+            entity.Property(x => x.Nombre).HasMaxLength(1000);
+            entity.Property(x => x.CategoriaCodigo).HasMaxLength(3);
+            entity.Property(x => x.Categoria).HasMaxLength(1000);
+            entity.HasIndex(x => x.CategoriaCodigo);
+        });
 
         modelBuilder.Entity<Usuario>()
             .HasIndex(x => x.NombreUsuario)

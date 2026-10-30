@@ -198,8 +198,10 @@ public class RecetasController : ControllerBase
             .AsNoTracking()
             .Include(x => x.Paciente)
             .ThenInclude(x => x.HistoriasClinicas)
+            .Include(x => x.Consulta)
             .Include(x => x.MedicoUsuario)
             .Include(x => x.Detalles.Where(d => d.EsActivo))
+            .ThenInclude(x => x.Producto)
             .FirstOrDefaultAsync(x => x.Id == id && x.EsActivo);
 
         if (receta is null)

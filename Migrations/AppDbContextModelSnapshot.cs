@@ -443,6 +443,34 @@ namespace ClinicaAmelita.Api.Migrations
                     b.ToTable("DocumentosSriDetalles", "clinica");
                 });
 
+            modelBuilder.Entity("ClinicaAmelita.Api.Entities.Enfermedad", b =>
+                {
+                    b.Property<string>("Codigo")
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<string>("Categoria")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<string>("CategoriaCodigo")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<string>("Nombre")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.HasKey("Codigo");
+
+                    b.HasIndex("CategoriaCodigo");
+
+                    b.ToTable("Enfermedades", "clinica");
+                });
+
             modelBuilder.Entity("ClinicaAmelita.Api.Entities.HistoriaClinica", b =>
                 {
                     b.Property<int>("Id")

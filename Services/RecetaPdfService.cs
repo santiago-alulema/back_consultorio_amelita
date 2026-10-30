@@ -151,7 +151,8 @@ public class RecetaPdfService
                         receta,
                         medicoImprime,
                         configuracion,
-                        rutaLogo
+                        rutaLogo,
+                        false
                     ));
 
                     row.ConstantItem(14).Element(DibujarLineaCorte);
@@ -161,7 +162,8 @@ public class RecetaPdfService
                         receta,
                         medicoImprime,
                         configuracion,
-                        rutaLogo
+                        rutaLogo,
+                        true
                     ));
                 });
             });
@@ -175,11 +177,10 @@ public class RecetaPdfService
         Receta receta,
         Usuario medicoImprime,
         ConfiguracionReceta configuracion,
-        string? rutaLogo)
+        string? rutaLogo,
+        bool esIndicaciones)
     {
         container
-            .Border(1)
-            .BorderColor("#2B5D87")
             .Padding(12)
             .Column(column =>
             {
@@ -210,7 +211,7 @@ public class RecetaPdfService
                         }
 
                         datos.Item().PaddingTop(3).AlignCenter().Text(
-                            $"Dr(a). {medicoImprime.Nombre} {medicoImprime.Apellido}"
+                            $"Dr(a). {receta.MedicoUsuario.Nombre} {receta.MedicoUsuario.Apellido}"
                         )
                             .FontSize(9)
                             .Bold();
@@ -233,17 +234,15 @@ public class RecetaPdfService
 
                 column.Item()
                     .PaddingTop(3)
-                    .Text("Rp.:")
+                    .Text(esIndicaciones ? "Indicaciones:" : "Rp.:")
                     .FontSize(13)
                     .Bold()
                     .Italic()
                     .FontColor("#2B5D87");
 
                 column.Item()
-                    .MinHeight(285)
-                    .Border(1)
-                    .BorderColor("#B8C7D3")
-                    .Padding(10)
+                    .MinHeight(230)
+                    .PaddingVertical(10)
                     .Column(contenido =>
                     {
                         contenido.Spacing(8);
@@ -252,33 +251,30 @@ public class RecetaPdfService
                         {
                             contenido.Item().Column(item =>
                             {
-                                item.Item().Text(detalle.Medicamento)
-                                    .Bold()
-                                    .FontSize(10);
-
-                                var indicaciones = string.Join(
-                                    " · ",
-                                    new[]
-                                    {
-                                        detalle.Dosis,
-                                        string.IsNullOrWhiteSpace(detalle.Frecuencia)
-                                            ? null
-                                            : $"Cada {detalle.Frecuencia}",
-                                        string.IsNullOrWhiteSpace(detalle.Duracion)
-                                            ? null
-                                            : $"por {detalle.Duracion}",
-                                        detalle.Indicaciones
-                                    }.Where(x => !string.IsNullOrWhiteSpace(x))
-                                );
-
-                                if (!string.IsNullOrWhiteSpace(indicaciones))
+                                if (esIndicaciones)
                                 {
-                                    item.Item().Text(indicaciones).FontSize(8.5f);
+                                    item.Item().DefaultTextStyle(x => x.FontSize(10)).Text(texto =>
+                                    {
+                                        texto.Span(detalle.Medicamento + ": ").Bold();
+                                        texto.Span(ObtenerIndicaciones(detalle));
+                                    });
+                                }
+                                else
+                                {
+                                    var cantidad = detalle.Cantidad.HasValue
+                                        ? $" # {detalle.Cantidad.Value:0.##} ({CantidadEnLetras(detalle.Cantidad.Value)})"
+                                        : "";
+                                    item.Item().Text($"{detalle.Medicamento} {detalle.Presentacion}{cantidad}")
+                                        .Bold().FontSize(11);
+                                    if (!string.IsNullOrWhiteSpace(detalle.Producto?.PrincipioActivo))
+                                    {
+                                        item.Item().Text(detalle.Producto.PrincipioActivo).FontSize(10);
+                                    }
                                 }
                             });
                         }
 
-                        if (!string.IsNullOrWhiteSpace(receta.IndicacionesGenerales))
+                        if (esIndicaciones && !string.IsNullOrWhiteSpace(receta.IndicacionesGenerales))
                         {
                             contenido.Item().PaddingTop(4).Text(texto =>
                             {
@@ -287,6 +283,13 @@ public class RecetaPdfService
                             });
                         }
                     });
+
+                column.Item().PaddingTop(12).AlignCenter().Text($"Dr(a). {receta.MedicoUsuario.Nombre} {receta.MedicoUsuario.Apellido}").Bold();
+                column.Item().AlignCenter().Text("Firma: __________________________").FontSize(8);
+                if (!string.IsNullOrWhiteSpace(receta.Consulta?.Diagnostico))
+                {
+                    column.Item().Text($"Diagnóstico / CIE 10: {receta.Consulta.Diagnostico}").FontSize(9);
+                }
 
                 column.Item().PaddingTop(5).AlignCenter().Text(
                     string.IsNullOrWhiteSpace(configuracion.PiePagina)
@@ -297,6 +300,69 @@ public class RecetaPdfService
                     .LetterSpacing(2)
                     .FontColor("#2B5D87");
             });
+    }
+
+    private static string ObtenerIndicaciones(RecetaDetalle detalle)
+    {
+        var frecuencia = detalle.Frecuencia.Trim();
+        if (!string.IsNullOrWhiteSpace(frecuencia) && !frecuencia.StartsWith("cada", StringComparison.OrdinalIgnoreCase))
+        {
+            frecuencia = $"cada {frecuencia}";
+        }
+        var duracion = detalle.Duracion.Trim();
+        if (!string.IsNullOrWhiteSpace(duracion) && !duracion.StartsWith("por", StringComparison.OrdinalIgnoreCase))
+        {
+            duracion = $"por {duracion}";
+        }
+        var pauta = string.Join(" ", new[] { detalle.Dosis, frecuencia, duracion }
+            .Where(x => !string.IsNullOrWhiteSpace(x)));
+        return string.Join(". ", new[] { pauta, detalle.Indicaciones }
+            .Where(x => !string.IsNullOrWhiteSpace(x)));
+    }
+
+    public static string CantidadEnLetras(decimal cantidad)
+    {
+        if (cantidad < 0) return "MENOS " + CantidadEnLetras(-cantidad);
+        if (cantidad != decimal.Truncate(cantidad))
+        {
+            var partes = cantidad.ToString("0.############################", System.Globalization.CultureInfo.InvariantCulture).Split('.');
+            return CantidadEnLetras(decimal.Parse(partes[0], System.Globalization.CultureInfo.InvariantCulture))
+                + " COMA " + string.Join(" ", partes[1].Select(x => CantidadEnLetras(x - '0')));
+        }
+        string[] unidades = { "CERO", "UNO", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE", "DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE", "DIECISÉIS", "DIECISIETE", "DIECIOCHO", "DIECINUEVE", "VEINTE", "VEINTIUNO", "VEINTIDÓS", "VEINTITRÉS", "VEINTICUATRO", "VEINTICINCO", "VEINTISÉIS", "VEINTISIETE", "VEINTIOCHO", "VEINTINUEVE" };
+        if (cantidad < 30) return unidades[(int)cantidad];
+        if (cantidad < 100)
+        {
+            string[] decenas = { "", "", "", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA", "NOVENTA" };
+            return decenas[(int)(cantidad / 10)] + (cantidad % 10 == 0 ? "" : " Y " + CantidadEnLetras(cantidad % 10));
+        }
+        if (cantidad == 100) return "CIEN";
+        if (cantidad < 1000)
+        {
+            string[] centenas = { "", "CIENTO", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS", "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS" };
+            return centenas[(int)(cantidad / 100)] + (cantidad % 100 == 0 ? "" : " " + CantidadEnLetras(cantidad % 100));
+        }
+        if (cantidad < 1000000)
+        {
+            var miles = decimal.Truncate(cantidad / 1000);
+            return (miles == 1 ? "MIL" : Apocopar(CantidadEnLetras(miles)) + " MIL")
+                + (cantidad % 1000 == 0 ? "" : " " + CantidadEnLetras(cantidad % 1000));
+        }
+        if (cantidad < 1000000000000m)
+        {
+            var millones = decimal.Truncate(cantidad / 1000000);
+            return (millones == 1 ? "UN MILLÓN" : Apocopar(CantidadEnLetras(millones)) + " MILLONES")
+                + (cantidad % 1000000 == 0 ? "" : " " + CantidadEnLetras(cantidad % 1000000));
+        }
+        var billones = decimal.Truncate(cantidad / 1000000000000m);
+        return (billones == 1 ? "UN BILLÓN" : Apocopar(CantidadEnLetras(billones)) + " BILLONES")
+            + (cantidad % 1000000000000m == 0 ? "" : " " + CantidadEnLetras(cantidad % 1000000000000m));
+    }
+
+    private static string Apocopar(string numero)
+    {
+        if (numero.EndsWith("VEINTIUNO")) return numero[..^9] + "VEINTIÚN";
+        return numero.EndsWith("UNO") ? numero[..^3] + "UN" : numero;
     }
 
     private static void DatosPaciente(IContainer container, Receta receta)
@@ -328,7 +394,7 @@ public class RecetaPdfService
                 row.RelativeItem().Text(texto =>
                 {
                     texto.Span("Fecha: ").Bold();
-                    texto.Span(DateTime.UtcNow.AddHours(-5).ToString("dd/MM/yyyy"));
+                    texto.Span(receta.FechaEmision.AddHours(-5).ToString("dd/MM/yyyy"));
                 });
 
                 row.RelativeItem().Text(texto =>

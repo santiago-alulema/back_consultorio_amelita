@@ -36,7 +36,10 @@ public class ProductosController : ControllerBase
         decimal? PrecioCajaDescuento,
         decimal PrecioCompra,
         decimal PrecioVenta,
-        decimal StockMinimo
+        decimal StockMinimo,
+        string? NumeroLote = null,
+        DateOnly? FechaCaducidad = null,
+        decimal StockInicial = 0
     );
 
     [HttpGet]
@@ -125,6 +128,13 @@ public class ProductosController : ControllerBase
             return BadRequest("El código ya existe.");
         }
 
+        if (request.StockInicial < 0 || (request.StockInicial > 0
+            && (string.IsNullOrWhiteSpace(request.NumeroLote) || !request.FechaCaducidad.HasValue)))
+        {
+            return BadRequest("Indique lote y caducidad para registrar el stock inicial.");
+        }
+
+        await using var transaccion = await _db.Database.BeginTransactionAsync();
         var producto = new Producto
         {
             Codigo = request.Codigo,
@@ -146,7 +156,16 @@ public class ProductosController : ControllerBase
         _db.Productos.Add(producto);
         await _db.SaveChangesAsync();
 
-        return Ok(producto);
+        if (!string.IsNullOrWhiteSpace(request.NumeroLote))
+        {
+            await _inventarioService.RegistrarEntrada(
+                producto.Id, request.NumeroLote.Trim(), request.FechaCaducidad,
+                request.StockInicial, TipoMovimientoInventario.CargaInicial,
+                User.GetUserId(), "Registro de producto", request.PrecioCompra);
+        }
+
+        await transaccion.CommitAsync();
+        return Ok(new { producto.Id });
     }
 
     [HttpPut("{id:int}")]
