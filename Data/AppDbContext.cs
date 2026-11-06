@@ -38,6 +38,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     {
         modelBuilder.HasDefaultSchema("clinica");
 
+        modelBuilder.HasSequence<long>("RecetasSecuencial", "clinica");
+
+        modelBuilder.Entity<Receta>()
+            .Property(x => x.Secuencial)
+            .HasDefaultValueSql("nextval('clinica.\"RecetasSecuencial\"'::regclass)");
+
+        modelBuilder.Entity<Receta>()
+            .HasIndex(x => x.Secuencial)
+            .IsUnique();
+
         modelBuilder.Entity<Enfermedad>(entity =>
         {
             entity.HasKey(x => x.Codigo);

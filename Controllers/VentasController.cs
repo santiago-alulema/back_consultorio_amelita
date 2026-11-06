@@ -85,10 +85,12 @@ public class VentasController : ControllerBase
         try
         {
             var usuarioId = User.GetUserId();
+            const string identificacionConsumidorFinal = "9999999999";
+            var esConsumidorFinal = request.IdentificacionCliente?.Trim() == identificacionConsumidorFinal;
             var venta = new Venta
             {
-                IdentificacionCliente = request.IdentificacionCliente,
-                NombreCliente = request.NombreCliente,
+                IdentificacionCliente = esConsumidorFinal ? identificacionConsumidorFinal : request.IdentificacionCliente,
+                NombreCliente = esConsumidorFinal ? "Consumidor final" : request.NombreCliente,
                 FormaPago = request.FormaPago,
                 UsuarioCreacionId = usuarioId
             };

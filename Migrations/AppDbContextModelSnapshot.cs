@@ -23,6 +23,8 @@ namespace ClinicaAmelita.Api.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.HasSequence("RecetasSecuencial", "clinica");
+
             modelBuilder.Entity("ClinicaAmelita.Api.Entities.Auditoria", b =>
                 {
                     b.Property<long>("Id")
@@ -1117,6 +1119,11 @@ namespace ClinicaAmelita.Api.Migrations
                     b.Property<int>("PacienteId")
                         .HasColumnType("integer");
 
+                    b.Property<long>("Secuencial")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint")
+                        .HasDefaultValueSql("nextval('clinica.\"RecetasSecuencial\"'::regclass)");
+
                     b.Property<int?>("UsuarioActualizacionId")
                         .HasColumnType("integer");
 
@@ -1130,6 +1137,9 @@ namespace ClinicaAmelita.Api.Migrations
                     b.HasIndex("MedicoUsuarioId");
 
                     b.HasIndex("PacienteId");
+
+                    b.HasIndex("Secuencial")
+                        .IsUnique();
 
                     b.ToTable("Recetas", "clinica");
                 });

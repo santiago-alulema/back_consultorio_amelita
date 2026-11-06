@@ -168,6 +168,32 @@ public class ProductosController : ControllerBase
         return Ok(new { producto.Id });
     }
 
+    public record PrecioVentaRequest(decimal? PrecioVenta);
+
+    [HttpPatch("{id:int}/precio-venta")]
+    public async Task<IActionResult> ActualizarPrecioVenta(int id, PrecioVentaRequest request)
+    {
+        if (request.PrecioVenta is not decimal precio
+            || precio < 0
+            || precio >= 100_000_000_000_000m
+            || decimal.Round(precio, 4) != precio)
+        {
+            return BadRequest("Ingrese un precio de venta válido con hasta cuatro decimales.");
+        }
+
+        var producto = await _db.Productos.FirstOrDefaultAsync(x => x.Id == id && x.EsActivo);
+        if (producto is null)
+        {
+            return NotFound();
+        }
+
+        producto.PrecioVenta = precio;
+        producto.UsuarioActualizacionId = User.GetUserId();
+        await _db.SaveChangesAsync();
+
+        return NoContent();
+    }
+
     [HttpPut("{id:int}")]
     public async Task<IActionResult> Update(int id, ProductoRequest request)
     {

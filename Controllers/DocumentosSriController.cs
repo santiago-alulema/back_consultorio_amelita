@@ -65,6 +65,32 @@ public class DocumentosSriController : ControllerBase
         return Ok(documentos);
     }
 
+    [HttpGet("{id:int}/ride")]
+    public async Task<IActionResult> VerRide(int id)
+    {
+        var documento = await _db.DocumentosSri.AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == id && x.EsActivo);
+
+        if (string.IsNullOrWhiteSpace(documento?.RidePdfPath))
+        {
+            return NotFound();
+        }
+
+        var nombre = Path.GetFileName(documento.RidePdfPath.Replace('\\', '/'));
+        if (!string.Equals(Path.GetExtension(nombre), ".pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            return NotFound();
+        }
+
+        var ruta = Path.Combine(_environment.ContentRootPath, "Uploads", "Facturas", nombre);
+        if (!System.IO.File.Exists(ruta))
+        {
+            return NotFound();
+        }
+
+        return PhysicalFile(ruta, "application/pdf");
+    }
+
     [HttpPost("subir")]
     public async Task<IActionResult> Subir(IFormFile xml, IFormFile? ridePdf)
     {

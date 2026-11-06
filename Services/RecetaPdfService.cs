@@ -230,6 +230,7 @@ public class RecetaPdfService
                 });
 
                 column.Item().LineHorizontal(1).LineColor("#7C99B2");
+                column.Item().Text($"Receta N.º {receta.Secuencial:D6}").Bold();
                 column.Item().Element(c => DatosPaciente(c, receta));
 
                 column.Item()

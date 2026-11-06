@@ -56,6 +56,7 @@ public class Consulta : BaseEntity
 
 public class Receta : BaseEntity
 {
+    public long Secuencial { get; set; }
     public int PacienteId { get; set; }
     public Paciente Paciente { get; set; } = null!;
     public int? ConsultaId { get; set; }

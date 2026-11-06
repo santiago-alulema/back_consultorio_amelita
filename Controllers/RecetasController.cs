@@ -53,6 +53,7 @@ public class RecetasController : ControllerBase
                 x.PacienteId,
                 x.ConsultaId,
                 Paciente = x.Paciente.Nombres + " " + x.Paciente.Apellidos,
+                x.Secuencial,
                 x.FechaEmision,
                 Medico = x.MedicoUsuario.Nombre + " " + x.MedicoUsuario.Apellido,
                 x.IndicacionesGenerales,
@@ -96,6 +97,7 @@ public class RecetasController : ControllerBase
                     x.Paciente.FechaNacimiento,
                     x.Paciente.Telefono
                 },
+                x.Secuencial,
                 x.FechaEmision,
                 Medico = new
                 {
@@ -187,7 +189,8 @@ public class RecetasController : ControllerBase
 
         return Ok(new
         {
-            receta.Id
+            receta.Id,
+            receta.Secuencial
         });
     }
 
@@ -219,7 +222,7 @@ public class RecetasController : ControllerBase
         }
 
         var pdf = await _recetaPdfService.GenerarAsync(receta, medicoImprime);
-        var nombre = $"receta_{receta.Id}_{receta.Paciente.Identificacion}.pdf";
+        var nombre = $"receta_{receta.Secuencial}_{receta.Paciente.Identificacion}.pdf";
 
         return File(pdf, "application/pdf", nombre);
     }
